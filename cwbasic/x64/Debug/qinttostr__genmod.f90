@@ -1,0 +1,10 @@
+        !COMPILER-GENERATED INTERFACE MODULE: Wed May 02 20:59:25 2018
+        MODULE QINTTOSTR__genmod
+          INTERFACE 
+            SUBROUTINE QINTTOSTR(M,STR,N)
+              INTEGER(KIND=4) :: N
+              INTEGER(KIND=4) :: M
+              CHARACTER(LEN=N) :: STR
+            END SUBROUTINE QINTTOSTR
+          END INTERFACE 
+        END MODULE QINTTOSTR__genmod
