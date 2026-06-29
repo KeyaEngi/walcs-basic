@@ -1,0 +1,26 @@
+# Visual Studio
+.vs/
+
+# Build folders
+Debug/
+Release/
+x64/
+
+# Intel Fortran
+*.obj
+*.mod
+*.pdb
+*.exe
+*.ilk
+*.idb
+*.ipdb
+*.iobj
+
+# User files
+*.suo
+
+# Logs
+*.log
+
+# Temporary
+*.tmp
