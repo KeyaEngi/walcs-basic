@@ -1,8 +1,0 @@
-        !COMPILER-GENERATED INTERFACE MODULE: Wed May 02 20:59:26 2018
-        MODULE IUTMP__genmod
-          INTERFACE 
-            SUBROUTINE IUTMP(IU)
-              INTEGER(KIND=4) :: IU
-            END SUBROUTINE IUTMP
-          END INTERFACE 
-        END MODULE IUTMP__genmod

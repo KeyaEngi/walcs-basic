@@ -1,7 +1,0 @@
-        !COMPILER-GENERATED INTERFACE MODULE: Wed May 02 20:59:02 2018
-        MODULE M_LINE__genmod
-          INTERFACE 
-            SUBROUTINE M_LINE
-            END SUBROUTINE M_LINE
-          END INTERFACE 
-        END MODULE M_LINE__genmod
