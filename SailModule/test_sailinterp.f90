@@ -1,0 +1,369 @@
+PROGRAM TEST_SAILINTERP
+  USE SAILPARAM_MOD
+  USE SAILDATABASE_MOD
+  USE SAILINTERP_MOD
+  USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_VALUE, IEEE_QUIET_NAN
+  IMPLICIT NONE
+
+  REAL(DP), PARAMETER :: NODE_TOL = 1.0E-13_DP
+  REAL(DP), PARAMETER :: INTERP_TOL = 1.0E-12_DP
+
+  INTEGER :: I
+  INTEGER :: IERR
+  INTEGER :: NODE_IERR
+  INTEGER :: N_DB
+  INTEGER :: N_PASS
+  INTEGER :: N_FAIL
+  INTEGER :: NONUNIFORM_INDEX
+  INTEGER :: FIRST_FAILED_NODE
+  INTEGER :: FIRST_FAILED_IERR
+  REAL(DP) :: ALPHA_QUERY
+  REAL(DP) :: ALPHA_0
+  REAL(DP) :: ALPHA_1
+  REAL(DP) :: ALPHA_2
+  REAL(DP) :: CL_ACTUAL
+  REAL(DP) :: CD_ACTUAL
+  REAL(DP) :: CL_EXPECTED
+  REAL(DP) :: CD_EXPECTED
+  REAL(DP) :: CL_1
+  REAL(DP) :: CL_2
+  REAL(DP) :: CD_1
+  REAL(DP) :: CD_2
+  REAL(DP) :: CL_REFERENCE
+  REAL(DP) :: CD_REFERENCE
+  REAL(DP) :: MAX_CL_NODE_ERROR
+  REAL(DP) :: MAX_CD_NODE_ERROR
+  REAL(DP) :: FIRST_FAILED_ALPHA
+  REAL(DP) :: FIRST_FAILED_CL_ACTUAL
+  REAL(DP) :: FIRST_FAILED_CD_ACTUAL
+  REAL(DP) :: FIRST_FAILED_CL_EXPECTED
+  REAL(DP) :: FIRST_FAILED_CD_EXPECTED
+  REAL(DP) :: WEIGHT_EXPECTED
+  REAL(DP) :: NAN_VALUE
+  LOGICAL :: OK
+  LOGICAL :: FOUND_NONUNIFORM
+  CHARACTER(LEN=2048) :: MESSAGE
+  CHARACTER(LEN=2048) :: NODE_MESSAGE
+  CHARACTER(LEN=2048) :: DETAIL
+  CHARACTER(LEN=2048) :: DETAIL_BASE
+  CHARACTER(LEN=2048) :: FIRST_FAILED_MESSAGE
+
+  N_PASS = 0
+  N_FAIL = 0
+
+  ! 15.1: the interpolator must reject use before database initialization.
+  CALL ClearSailDatabase()
+  CALL GetSailCoeff(10.0_DP, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.1 Uninitialized database', 10.0_DP, &
+    IERR, SAIL_ERR_DATABASE_NOT_INITIALIZED, CL_ACTUAL, CD_ACTUAL, &
+    0.0_DP, 0.0_DP, 0.0_DP, MESSAGE)
+
+  ! 15.2: initialize the production database and verify its required size.
+  CALL ReadSailDatabase('sail_database.dat', IERR, MESSAGE)
+  N_DB = GetSailDatabaseSize()
+  OK = IERR == SAIL_OK .AND. N_DB == 33
+  WRITE(DETAIL, '(A,I0,A,I0,A,A)') 'actual IERR=', IERR, &
+    ', node count=', N_DB, ', MESSAGE=', TRIM(MESSAGE)
+  CALL ReportSimple('15.2 Production database initialization', OK, DETAIL)
+
+  ! 15.3: reconstruct every original database node exactly.
+  MAX_CL_NODE_ERROR = 0.0_DP
+  MAX_CD_NODE_ERROR = 0.0_DP
+  FIRST_FAILED_NODE = 0
+  FIRST_FAILED_IERR = SAIL_OK
+  FIRST_FAILED_ALPHA = 0.0_DP
+  FIRST_FAILED_CL_ACTUAL = 0.0_DP
+  FIRST_FAILED_CD_ACTUAL = 0.0_DP
+  FIRST_FAILED_CL_EXPECTED = 0.0_DP
+  FIRST_FAILED_CD_EXPECTED = 0.0_DP
+  FIRST_FAILED_MESSAGE = ''
+  OK = N_DB == 33
+  DO I = 1, N_DB
+    CALL GetSailDatabaseNode(I, ALPHA_1, CL_EXPECTED, CD_EXPECTED, &
+      NODE_IERR, NODE_MESSAGE)
+    IF (NODE_IERR == SAIL_OK) THEN
+      CALL GetSailCoeff(ALPHA_1, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+    ELSE
+      IERR = NODE_IERR
+      CL_ACTUAL = 0.0_DP
+      CD_ACTUAL = 0.0_DP
+      MESSAGE = 'Node read failed: ' // TRIM(NODE_MESSAGE)
+    END IF
+
+    MAX_CL_NODE_ERROR = MAX(MAX_CL_NODE_ERROR, &
+      ABS(CL_ACTUAL - CL_EXPECTED))
+    MAX_CD_NODE_ERROR = MAX(MAX_CD_NODE_ERROR, &
+      ABS(CD_ACTUAL - CD_EXPECTED))
+    IF (IERR /= SAIL_OK .OR. &
+        ABS(CL_ACTUAL - CL_EXPECTED) > NODE_TOL .OR. &
+        ABS(CD_ACTUAL - CD_EXPECTED) > NODE_TOL) THEN
+      OK = .FALSE.
+      IF (FIRST_FAILED_NODE == 0) THEN
+        FIRST_FAILED_NODE = I
+        FIRST_FAILED_IERR = IERR
+        FIRST_FAILED_ALPHA = ALPHA_1
+        FIRST_FAILED_CL_ACTUAL = CL_ACTUAL
+        FIRST_FAILED_CD_ACTUAL = CD_ACTUAL
+        FIRST_FAILED_CL_EXPECTED = CL_EXPECTED
+        FIRST_FAILED_CD_EXPECTED = CD_EXPECTED
+        FIRST_FAILED_MESSAGE = MESSAGE
+      END IF
+    END IF
+  END DO
+  WRITE(DETAIL, '(A,I0,A,ES16.8,A,ES16.8)') &
+    'nodes checked=', N_DB, ', MAX_CL_NODE_ERROR=', MAX_CL_NODE_ERROR, &
+    ', MAX_CD_NODE_ERROR=', MAX_CD_NODE_ERROR
+  IF (.NOT. OK .AND. FIRST_FAILED_NODE > 0) THEN
+    DETAIL_BASE = DETAIL
+    WRITE(DETAIL, '(A,A,I0,A,ES16.8,A,I0,A,I0,A,2(ES16.8,1X),A,2(ES16.8,1X),A,2(ES16.8,1X),A,A)') &
+      TRIM(DETAIL_BASE), '; first failed node=', FIRST_FAILED_NODE, &
+      ', alpha=', FIRST_FAILED_ALPHA, ', actual IERR=', &
+      FIRST_FAILED_IERR, ', expected IERR=', SAIL_OK, &
+      ', actual CL/CD=', &
+      FIRST_FAILED_CL_ACTUAL, FIRST_FAILED_CD_ACTUAL, &
+      ', expected CL/CD=', FIRST_FAILED_CL_EXPECTED, &
+      FIRST_FAILED_CD_EXPECTED, ', absolute errors=', &
+      ABS(FIRST_FAILED_CL_ACTUAL - FIRST_FAILED_CL_EXPECTED), &
+      ABS(FIRST_FAILED_CD_ACTUAL - FIRST_FAILED_CD_EXPECTED), &
+      ', MESSAGE=', TRIM(FIRST_FAILED_MESSAGE)
+  END IF
+  CALL ReportSimple('15.3 All-node exact reconstruction', OK, DETAIL)
+
+  ! 15.4 and 15.5: required endpoint values.
+  CALL GetSailCoeff(0.0_DP, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.4 Left endpoint', 0.0_DP, IERR, SAIL_OK, &
+    CL_ACTUAL, CD_ACTUAL, -0.29395224_DP, 0.17179593_DP, &
+    NODE_TOL, MESSAGE)
+
+  CALL GetSailCoeff(180.0_DP, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.5 Right endpoint', 180.0_DP, IERR, &
+    SAIL_OK, CL_ACTUAL, CD_ACTUAL, 0.26555131_DP, 0.17291675_DP, &
+    NODE_TOL, MESSAGE)
+
+  ! 15.6: midpoint of the first interval, with no hard-coded second angle.
+  CALL ReadPair(1, ALPHA_1, CL_1, CD_1, ALPHA_2, CL_2, CD_2, OK)
+  ALPHA_QUERY = 0.5_DP * (ALPHA_1 + ALPHA_2)
+  CL_EXPECTED = 0.5_DP * (CL_1 + CL_2)
+  CD_EXPECTED = 0.5_DP * (CD_1 + CD_2)
+  CALL GetSailCoeff(ALPHA_QUERY, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  IF (.NOT. OK) IERR = SAIL_ERR_INTERPOLATION
+  CALL ReportCoeffResult('15.6 First-interval midpoint', ALPHA_QUERY, &
+    IERR, SAIL_OK, CL_ACTUAL, CD_ACTUAL, CL_EXPECTED, CD_EXPECTED, &
+    INTERP_TOL, MESSAGE)
+
+  ! 15.7: a non-midpoint in an interior interval.
+  WEIGHT_EXPECTED = 0.3_DP
+  CALL ReadPair(10, ALPHA_1, CL_1, CD_1, ALPHA_2, CL_2, CD_2, OK)
+  ALPHA_QUERY = ALPHA_1 + WEIGHT_EXPECTED * (ALPHA_2 - ALPHA_1)
+  CL_EXPECTED = CL_1 + WEIGHT_EXPECTED * (CL_2 - CL_1)
+  CD_EXPECTED = CD_1 + WEIGHT_EXPECTED * (CD_2 - CD_1)
+  CALL GetSailCoeff(ALPHA_QUERY, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  IF (.NOT. OK) IERR = SAIL_ERR_INTERPOLATION
+  CALL ReportCoeffResult('15.7 Interior non-midpoint', ALPHA_QUERY, &
+    IERR, SAIL_OK, CL_ACTUAL, CD_ACTUAL, CL_EXPECTED, CD_EXPECTED, &
+    INTERP_TOL, MESSAGE)
+
+  ! 15.8: midpoint of the final interval.
+  CALL ReadPair(N_DB - 1, ALPHA_1, CL_1, CD_1, &
+    ALPHA_2, CL_2, CD_2, OK)
+  ALPHA_QUERY = 0.5_DP * (ALPHA_1 + ALPHA_2)
+  CL_EXPECTED = 0.5_DP * (CL_1 + CL_2)
+  CD_EXPECTED = 0.5_DP * (CD_1 + CD_2)
+  CALL GetSailCoeff(ALPHA_QUERY, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  IF (.NOT. OK) IERR = SAIL_ERR_INTERPOLATION
+  CALL ReportCoeffResult('15.8 Final-interval midpoint', ALPHA_QUERY, &
+    IERR, SAIL_OK, CL_ACTUAL, CD_ACTUAL, CL_EXPECTED, CD_EXPECTED, &
+    INTERP_TOL, MESSAGE)
+
+  ! 15.9: locate, rather than assume, a change in adjacent node spacing.
+  FOUND_NONUNIFORM = .FALSE.
+  NONUNIFORM_INDEX = 0
+  DO I = 2, N_DB - 1
+    CALL GetSailDatabaseNode(I - 1, ALPHA_0, CL_ACTUAL, CD_ACTUAL, &
+      IERR, MESSAGE)
+    CALL GetSailDatabaseNode(I, ALPHA_1, CL_ACTUAL, CD_ACTUAL, &
+      NODE_IERR, NODE_MESSAGE)
+    IF (IERR /= SAIL_OK .OR. NODE_IERR /= SAIL_OK) CYCLE
+    CALL GetSailDatabaseNode(I + 1, ALPHA_2, CL_ACTUAL, CD_ACTUAL, &
+      NODE_IERR, NODE_MESSAGE)
+    IF (NODE_IERR /= SAIL_OK) CYCLE
+    IF (ABS((ALPHA_2 - ALPHA_1) - (ALPHA_1 - ALPHA_0)) > &
+        DATABASE_TOL) THEN
+      FOUND_NONUNIFORM = .TRUE.
+      NONUNIFORM_INDEX = I
+      EXIT
+    END IF
+  END DO
+
+  IF (FOUND_NONUNIFORM) THEN
+    WEIGHT_EXPECTED = 0.4_DP
+    CALL ReadPair(NONUNIFORM_INDEX, ALPHA_1, CL_1, CD_1, &
+      ALPHA_2, CL_2, CD_2, OK)
+    ALPHA_QUERY = ALPHA_1 + WEIGHT_EXPECTED * (ALPHA_2 - ALPHA_1)
+    CL_EXPECTED = CL_1 + WEIGHT_EXPECTED * (CL_2 - CL_1)
+    CD_EXPECTED = CD_1 + WEIGHT_EXPECTED * (CD_2 - CD_1)
+    CALL GetSailCoeff(ALPHA_QUERY, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+    IF (.NOT. OK) IERR = SAIL_ERR_INTERPOLATION
+  ELSE
+    ALPHA_QUERY = 0.0_DP
+    CL_ACTUAL = 0.0_DP
+    CD_ACTUAL = 0.0_DP
+    CL_EXPECTED = 0.0_DP
+    CD_EXPECTED = 0.0_DP
+    IERR = SAIL_ERR_INTERPOLATION
+    MESSAGE = 'No nonuniform database spacing was found.'
+  END IF
+  CALL ReportCoeffResult('15.9 Nonuniform-spacing interval', &
+    ALPHA_QUERY, IERR, SAIL_OK, CL_ACTUAL, CD_ACTUAL, CL_EXPECTED, &
+    CD_EXPECTED, INTERP_TOL, MESSAGE)
+
+  ! 15.10 and 15.11: tolerance-sized excursions clamp to endpoints.
+  ALPHA_QUERY = ALPHA_DB_MIN_DEG - 0.5_DP * ANGLE_TOL_DEG
+  CALL GetSailCoeff(ALPHA_QUERY, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.10 Lower-bound tolerance', ALPHA_QUERY, &
+    IERR, SAIL_OK, CL_ACTUAL, CD_ACTUAL, -0.29395224_DP, &
+    0.17179593_DP, NODE_TOL, MESSAGE)
+
+  ALPHA_QUERY = ALPHA_DB_MAX_DEG + 0.5_DP * ANGLE_TOL_DEG
+  CALL GetSailCoeff(ALPHA_QUERY, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.11 Upper-bound tolerance', ALPHA_QUERY, &
+    IERR, SAIL_OK, CL_ACTUAL, CD_ACTUAL, 0.26555131_DP, &
+    0.17291675_DP, NODE_TOL, MESSAGE)
+
+  ! 15.12 and 15.13: no extrapolation or periodic mapping.
+  CALL GetSailCoeff(-1.0_DP, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.12 Below-range rejection', -1.0_DP, &
+    IERR, SAIL_ERR_INVALID_INPUT, CL_ACTUAL, CD_ACTUAL, 0.0_DP, &
+    0.0_DP, 0.0_DP, MESSAGE)
+
+  CALL GetSailCoeff(181.0_DP, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.13 Above-range rejection', 181.0_DP, &
+    IERR, SAIL_ERR_INVALID_INPUT, CL_ACTUAL, CD_ACTUAL, 0.0_DP, &
+    0.0_DP, 0.0_DP, MESSAGE)
+
+  ! 15.14: construct a quiet NaN portably with IEEE_ARITHMETIC.
+  NAN_VALUE = IEEE_VALUE(0.0_DP, IEEE_QUIET_NAN)
+  CALL GetSailCoeff(NAN_VALUE, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.14 NaN rejection', NAN_VALUE, IERR, &
+    SAIL_ERR_INVALID_INPUT, CL_ACTUAL, CD_ACTUAL, 0.0_DP, 0.0_DP, &
+    0.0_DP, MESSAGE)
+
+  ! 15.15: repeat a non-node query and require stable results.
+  CALL ReadPair(10, ALPHA_1, CL_1, CD_1, ALPHA_2, CL_2, CD_2, OK)
+  ALPHA_QUERY = ALPHA_1 + 0.37_DP * (ALPHA_2 - ALPHA_1)
+  CALL GetSailCoeff(ALPHA_QUERY, CL_REFERENCE, CD_REFERENCE, &
+    IERR, MESSAGE)
+  OK = OK .AND. IERR == SAIL_OK
+  DO I = 1, 1000
+    CALL GetSailCoeff(ALPHA_QUERY, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+    IF (IERR /= SAIL_OK .OR. &
+        ABS(CL_ACTUAL - CL_REFERENCE) > INTERP_TOL .OR. &
+        ABS(CD_ACTUAL - CD_REFERENCE) > INTERP_TOL) THEN
+      OK = .FALSE.
+    END IF
+  END DO
+  WRITE(DETAIL, '(A,L1,A,ES16.8,A,ES16.8,A,A)') &
+    '1000 repeated calls stable=', OK, ', reference CL=', CL_REFERENCE, &
+    ', reference CD=', CD_REFERENCE, ', last MESSAGE=', TRIM(MESSAGE)
+  CALL ReportSimple('15.15 Repeated-call stability', OK, DETAIL)
+
+  ! 15.16: cleanup must immediately make interpolation unavailable again.
+  CALL ClearSailDatabase()
+  CALL GetSailCoeff(10.0_DP, CL_ACTUAL, CD_ACTUAL, IERR, MESSAGE)
+  CALL ReportCoeffResult('15.16 Call after database cleanup', 10.0_DP, &
+    IERR, SAIL_ERR_DATABASE_NOT_INITIALIZED, CL_ACTUAL, CD_ACTUAL, &
+    0.0_DP, 0.0_DP, 0.0_DP, MESSAGE)
+
+  WRITE(*, '(A)') '========================================'
+  WRITE(*, '(A)') 'SAILINTERP TEST SUMMARY'
+  WRITE(*, '(A,I0)') 'PASS: ', N_PASS
+  WRITE(*, '(A,I0)') 'FAIL: ', N_FAIL
+  WRITE(*, '(A,ES16.8)') 'MAX_CL_NODE_ERROR: ', MAX_CL_NODE_ERROR
+  WRITE(*, '(A,ES16.8)') 'MAX_CD_NODE_ERROR: ', MAX_CD_NODE_ERROR
+  WRITE(*, '(A)') '========================================'
+
+  IF (N_FAIL > 0) STOP 1
+
+CONTAINS
+
+  SUBROUTINE ReadPair(LEFT_INDEX, ALPHA_LEFT, CL_LEFT, CD_LEFT, &
+      ALPHA_RIGHT, CL_RIGHT, CD_RIGHT, SUCCESS)
+    INTEGER, INTENT(IN) :: LEFT_INDEX
+    REAL(DP), INTENT(OUT) :: ALPHA_LEFT
+    REAL(DP), INTENT(OUT) :: CL_LEFT
+    REAL(DP), INTENT(OUT) :: CD_LEFT
+    REAL(DP), INTENT(OUT) :: ALPHA_RIGHT
+    REAL(DP), INTENT(OUT) :: CL_RIGHT
+    REAL(DP), INTENT(OUT) :: CD_RIGHT
+    LOGICAL, INTENT(OUT) :: SUCCESS
+
+    INTEGER :: LOCAL_IERR
+    CHARACTER(LEN=2048) :: LOCAL_MESSAGE
+
+    CALL GetSailDatabaseNode(LEFT_INDEX, ALPHA_LEFT, CL_LEFT, CD_LEFT, &
+      LOCAL_IERR, LOCAL_MESSAGE)
+    SUCCESS = LOCAL_IERR == SAIL_OK
+    CALL GetSailDatabaseNode(LEFT_INDEX + 1, ALPHA_RIGHT, CL_RIGHT, &
+      CD_RIGHT, LOCAL_IERR, LOCAL_MESSAGE)
+    SUCCESS = SUCCESS .AND. LOCAL_IERR == SAIL_OK
+  END SUBROUTINE ReadPair
+
+
+  SUBROUTINE ReportCoeffResult(TEST_NAME, QUERY, ACTUAL_IERR, &
+      EXPECTED_IERR, ACTUAL_CL, ACTUAL_CD, EXPECTED_CL, EXPECTED_CD, &
+      TOLERANCE, TEST_MESSAGE)
+    CHARACTER(LEN=*), INTENT(IN) :: TEST_NAME
+    REAL(DP), INTENT(IN) :: QUERY
+    INTEGER, INTENT(IN) :: ACTUAL_IERR
+    INTEGER, INTENT(IN) :: EXPECTED_IERR
+    REAL(DP), INTENT(IN) :: ACTUAL_CL
+    REAL(DP), INTENT(IN) :: ACTUAL_CD
+    REAL(DP), INTENT(IN) :: EXPECTED_CL
+    REAL(DP), INTENT(IN) :: EXPECTED_CD
+    REAL(DP), INTENT(IN) :: TOLERANCE
+    CHARACTER(LEN=*), INTENT(IN) :: TEST_MESSAGE
+
+    LOGICAL :: PASSED
+
+    PASSED = ACTUAL_IERR == EXPECTED_IERR .AND. &
+      ABS(ACTUAL_CL - EXPECTED_CL) <= TOLERANCE .AND. &
+      ABS(ACTUAL_CD - EXPECTED_CD) <= TOLERANCE
+    WRITE(*, '(A)') '--------------------------------------------------'
+    WRITE(*, '(A)') TRIM(TEST_NAME)
+    IF (PASSED) THEN
+      N_PASS = N_PASS + 1
+      WRITE(*, '(A)') '[PASS]'
+    ELSE
+      N_FAIL = N_FAIL + 1
+      WRITE(*, '(A)') '[FAIL]'
+      WRITE(*, '(A,ES24.16)') 'query alpha: ', QUERY
+      WRITE(*, '(A,I0)') 'actual IERR: ', ACTUAL_IERR
+      WRITE(*, '(A,I0)') 'expected IERR: ', EXPECTED_IERR
+      WRITE(*, '(A,2(ES24.16,1X))') 'actual CL/CD: ', ACTUAL_CL, ACTUAL_CD
+      WRITE(*, '(A,2(ES24.16,1X))') &
+        'expected CL/CD: ', EXPECTED_CL, EXPECTED_CD
+      WRITE(*, '(A,2(ES24.16,1X))') 'absolute errors: ', &
+        ABS(ACTUAL_CL - EXPECTED_CL), ABS(ACTUAL_CD - EXPECTED_CD)
+      WRITE(*, '(A,A)') 'MESSAGE: ', TRIM(TEST_MESSAGE)
+    END IF
+  END SUBROUTINE ReportCoeffResult
+
+
+  SUBROUTINE ReportSimple(TEST_NAME, PASSED, TEST_DETAIL)
+    CHARACTER(LEN=*), INTENT(IN) :: TEST_NAME
+    LOGICAL, INTENT(IN) :: PASSED
+    CHARACTER(LEN=*), INTENT(IN) :: TEST_DETAIL
+
+    WRITE(*, '(A)') '--------------------------------------------------'
+    WRITE(*, '(A)') TRIM(TEST_NAME)
+    IF (PASSED) THEN
+      N_PASS = N_PASS + 1
+      WRITE(*, '(A)') '[PASS]'
+    ELSE
+      N_FAIL = N_FAIL + 1
+      WRITE(*, '(A)') '[FAIL]'
+      WRITE(*, '(A)') TRIM(TEST_DETAIL)
+    END IF
+  END SUBROUTINE ReportSimple
+
+END PROGRAM TEST_SAILINTERP
